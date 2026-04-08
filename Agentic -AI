@@ -1,0 +1,341 @@
+# === Cell 1: Install Dependencies ===
+# We pin to versions that behave well in most Anaconda setups.
+# If your environment already has some of these, pip will skip or upgrade as needed.
+
+# 1) Make sure pip is fresh
+%pip install --upgrade pip
+
+# 2) Gradio: pick a known-good window (4.28 ≤ gradio < 4.40)
+%pip install "gradio>=4.28,<4.40" pillow numpy pandas
+
+# 3) PyTorch CPU wheels (works everywhere; you can swap for CUDA if you have a GPU)
+%pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# 4) Vision + agents stack
+%pip install "transformers>=4.44.2" timm
+
+# 5) CrewAI + Pydantic v2 (CrewAI uses Pydantic v2 under the hood)
+%pip install "crewai==0.51.1" "pydantic>=2.8,<3"
+
+# 6) LangChain wrappers for OpenAI-compatible servers (LM Studio, etc.)
+%pip install "langchain>=0.2.14" "langchain-openai>=0.1.23"
+import sys
+!{sys.executable} -m pip show gradio huggingface-hub
+
+
+# === Cell 2: Config for LM Studio (local OpenAI-compatible server) ===
+# We set everything inline (no .env file), so students can see & modify easily.
+
+import os, json, requests
+
+# 1) Point to LM Studio’s local API server (default URL/port)
+os.environ["OPENAI_BASE_URL"] = "http://localhost:1234/v1"
+
+# 2) LM Studio ignores the actual key value but requires the Authorization header to exist
+os.environ["OPENAI_API_KEY"] = "lmstudio-key"
+
+# 3) Recommended classroom model (easy to run on most laptops)
+# In LM Studio, download & run:  TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+# Then set the model name here to match what LM Studio exposes.
+MODEL = "mistral-7b-instruct-v0.2"
+
+print("✅ Config loaded:")
+print("  OPENAI_BASE_URL:", os.environ["OPENAI_BASE_URL"])
+print("  OPENAI_API_KEY :", "(set)")
+print("  MODEL          :", MODEL)
+
+# ---- Quick connectivity check (student-proof) ----
+try:
+    resp = requests.get(
+        f"{os.environ['OPENAI_BASE_URL'].rstrip('/')}/models",
+        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+        timeout=6
+    )
+    resp.raise_for_status()
+    models = resp.json()
+    print("\n✅ LM Studio is reachable. Models endpoint responded.")
+    # Show a short snippet (avoid massive output)
+    print(json.dumps(models, indent=2)[:800], "...\n")
+except Exception as e:
+    print("\n⚠️ Could not reach LM Studio.")
+    print("   • Is LM Studio running?")
+    print("   • Is the API server ON (top right in LM Studio)?")
+    print("   • Is a chat model loaded?")
+    print("Error:", e)
+
+
+# === Cell 4: Load CLIP + zero-shot label ranking ===
+
+# === Cell 4: Load CLIP + zero-shot label ranking ===
+# We pick CLIP because it's small, fast to download, and works well for label matching.
+
+import torch
+from transformers import CLIPProcessor, CLIPModel
+
+DEVICE = "cpu"  # set to "cuda" if you installed GPU torch and have a GPU
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+
+clip_model = CLIPModel.from_pretrained(CLIP_MODEL_NAME).to(DEVICE)
+clip_processor = CLIPProcessor.from_pretrained(CLIP_MODEL_NAME)
+
+def clip_rank_labels(pil_image: Image.Image, candidate_texts: List[str], top_k: int = 3):
+    """
+    Compare an image against candidate labels and return the top_k by probability.
+    This is true zero-shot classification using CLIP's image-text similarity.
+    """
+    inputs = clip_processor(
+        text=[f"a photo of {t}" for t in candidate_texts],
+        images=pil_image,
+        return_tensors="pt",
+        padding=True
+    ).to(DEVICE)
+
+    with torch.no_grad():
+        outputs = clip_model(**inputs)
+        logits_per_image = outputs.logits_per_image  # shape (1, num_texts)
+        probs = logits_per_image.softmax(dim=1).cpu().numpy().flatten()
+
+    ranked = sorted(zip(candidate_texts, probs), key=lambda x: x[1], reverse=True)[:top_k]
+    return [{"label": lab, "prob": float(p)} for lab, p in ranked]
+
+
+
+# === Cell 5: LLM + CrewAI Agents ===
+# CrewAI expects each Agent to have an LLM object that supports `.bind()` (LangChain models do).
+# We use LangChain's ChatOpenAI pointing at LM Studio (OpenAI-compatible /chat/completions).
+
+import os
+from crewai import Agent  # We're using Agents to organize roles (lightweight for this project)
+from langchain_openai import ChatOpenAI
+
+# Create a LangChain chat LLM backed by LM Studio
+chat_llm = ChatOpenAI(
+    model=os.getenv("MODEL", "mistral-7b-instruct-v0.2"),   # must match LM Studio's model name
+    api_key=os.getenv("OPENAI_API_KEY", "lmstudio-key"),    # any non-empty string
+    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"),
+    temperature=0.3,
+    max_tokens=700,
+)
+
+# Utility: call the chat LLM with a system + user prompt and return content text
+def llm_chat(system_prompt: str, user_prompt: str) -> str:
+    """
+    LM Studio compatibility: many local prompt templates only accept `user` & `assistant`.
+    So we fold the "system" guidance into a single `user` message to avoid 400s.
+
+    If you later switch to a server/model that supports `system` messages,
+    you can toggle USE_SYSTEM=True below to use the true system+user format.
+    """
+    USE_SYSTEM = False  # Keep False for LM Studio templates that 400 on 'system'
+
+    if USE_SYSTEM:
+        # Native format (works with real OpenAI / some templates)
+        msg = chat_llm.invoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt}
+        ])
+    else:
+        # Compatibility format: one user message that embeds the system guidance.
+        one_message = (
+            "### System instruction (follow strictly):\n"
+            f"{system_prompt}\n\n"
+            "### User request:\n"
+            f"{user_prompt}"
+        )
+        # Passing a plain string creates a single HumanMessage under the hood.
+        msg = chat_llm.invoke(one_message)
+
+    return getattr(msg, "content", str(msg))
+
+# ---- Define agents (roles) so students see the multi-agent structure ----
+vision_analyst = Agent(
+    role="Vision Analyst",
+    goal="Identify likely foods in a photo using a vision tool and report top-3 with confidence.",
+    backstory="A careful computer-vision assistant focused on accurate label suggestions.",
+    verbose=True,
+    allow_delegation=False,
+    llm=chat_llm
+)
+
+nutritionist = Agent(
+    role="Nutritionist",
+    goal="Estimate calories/macros from ingredient list + portions using a small nutrition DB.",
+    backstory="A data-driven nutrition expert who is transparent about approximations.",
+    verbose=True,
+    allow_delegation=False,
+    llm=chat_llm
+)
+
+recipe_planner = Agent(
+    role="Recipe Planner",
+    goal="Create a simple, tasty, personalized recipe that matches dietary goals.",
+    backstory="A friendly home chef who writes clear steps and practical substitutions.",
+    verbose=True,
+    allow_delegation=False,
+    llm=chat_llm
+)
+
+# ---- Agent tools as plain Python functions ----
+def tool_detect_foods(image: Image.Image, top_k: int = 3) -> List[Dict[str, Any]]:
+    """Use CLIP zero-shot to propose top_k food labels with probabilities."""
+    return clip_rank_labels(image, CANDIDATE_LABELS, top_k=top_k)
+
+def tool_estimate_nutrition(detections: List[Dict[str, Any]], grams_map: Dict[str, float]) -> Dict[str, Any]:
+    """
+    Convert detected labels + gram estimates into per-ingredient + total macro counts.
+    grams_map keys can be 'salmon', 'beef steak', etc.; we normalize to DB keys.
+    """
+    items = []
+    totals = {"calories":0, "protein_g":0, "fat_g":0, "carbs_g":0, "fiber_g":0}
+
+    for d in detections:
+        raw_label = d["label"]
+        key = to_safe_key(raw_label)
+        grams = float(grams_map.get(raw_label, grams_map.get(key, 0)))
+        if grams <= 0:
+            continue
+        if key not in NUTRITION_DB:
+            # Unknown items are skipped (students can extend DB as exercise)
+            continue
+        scaled = scale_nutrition(NUTRITION_DB[key], grams)
+        items.append({"ingredient": raw_label, "grams": grams, **scaled})
+        for k in totals:
+            totals[k] += scaled[k]
+
+    totals = {k: round(v, 2) for k, v in totals.items()}
+    return {"items": items, "totals": totals}
+
+# ---- Orchestrator that "coordinates" agents (simple, explicit for teaching) ----
+def coordinator(image: Image.Image,
+                user_prefs: str,
+                servings: int = 2,
+                calories_goal: int = 600,
+                grams_overrides: Dict[str, float] | None = None) -> Dict[str, Any]:
+    """
+    High-level pipeline:
+      1) Vision Analyst -> detect labels (via tool_detect_foods)
+      2) Nutritionist   -> estimate macros (via tool_estimate_nutrition)
+      3) Recipe Planner -> generate recipe text (via LLM)
+    We keep this orchestrator explicit for clarity in a beginner notebook.
+    """
+
+    # 1) Vision
+    detections = tool_detect_foods(image, top_k=3)
+    labels = [d["label"] for d in detections]
+
+    # 2) Portion defaults (students can override in UI)
+    default_grams = {
+        lab: 150.0 if any(k in lab for k in ["salmon", "steak", "chicken"]) else 80.0
+        for lab in labels
+    }
+    grams_map = default_grams | (grams_overrides or {})
+
+    # 3) Nutrition
+    nutrition = tool_estimate_nutrition(detections, grams_map)
+
+    # 4) Recipe (LLM)
+    system = "You are a professional chef and nutrition coach. Be concise, friendly, and practical."
+    user = f"""
+Detected ingredients (top-3): {labels}
+Estimated totals (approx, for the whole dish): {nutrition['totals']}
+User preferences/restrictions: {user_prefs}
+Target calories per serving: ~{calories_goal}
+Servings: {servings}
+
+Write:
+1) A brief 2-sentence assessment of the plate and nutrition.
+2) A personalized recipe (ingredients list in grams + step-by-step instructions).
+3) One tip to adjust calories up or down while keeping protein reasonable.
+"""
+    recipe_text = llm_chat(system, user)
+
+    return {"detections": detections, "nutrition": nutrition, "recipe_text": recipe_text}
+
+
+
+# === Cell 6: Gradio UI ===
+import json
+import gradio as gr
+
+def nutrition_df(nutrition: Dict[str, Any]) -> pd.DataFrame:
+    """Render nutrition dict as a simple table with a TOTAL row."""
+    items = nutrition.get("items", [])
+    if not items:
+        return pd.DataFrame([nutrition["totals"]])
+    df = pd.DataFrame(items)
+    total_row = {"ingredient": "TOTAL", "grams": df["grams"].sum(), **nutrition["totals"]}
+    return pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+
+def run_pipeline(image, servings, calories_goal, dietary_prefs, grams_overrides_json):
+    # Convert incoming numpy array to PIL image
+    pil = Image.fromarray(image)
+
+    # Try to parse JSON overrides (students can specify {"salmon":180, "asparagus":90})
+    overrides = {}
+    if grams_overrides_json:
+        try:
+            overrides = json.loads(grams_overrides_json)
+        except Exception:
+            overrides = {}
+
+    # Orchestrate
+    result = coordinator(
+        pil,
+        user_prefs=dietary_prefs or "",
+        servings=int(servings),
+        calories_goal=int(calories_goal),
+        grams_overrides=overrides or None
+    )
+
+    labels = result["detections"]
+    df = nutrition_df(result["nutrition"])
+    recipe = result["recipe_text"]
+
+    return labels, df, recipe
+
+with gr.Blocks(title="🍽️ Agentic Food Analyzer", theme=gr.themes.Soft()) as demo:
+    gr.Markdown("## 🍽️ Agentic Food Analyzer\nUpload a food photo → get nutrition estimates → receive a personalized recipe.")
+    with gr.Row():
+        with gr.Column(scale=1):
+            image_in = gr.Image(type="numpy", label="Upload a food photo", height=320)
+            servings = gr.Slider(1, 6, value=2, step=1, label="Servings")
+            calories_goal = gr.Slider(200, 1200, value=600, step=50, label="Target Calories per Serving")
+            dietary_prefs = gr.Textbox(label="Dietary preferences / restrictions (e.g., high protein, no dairy, gluten-free)")
+            grams_overrides = gr.Textbox(
+                label="(Optional) Portion overrides as JSON (e.g., {\"salmon\": 180, \"asparagus\": 90})",
+                placeholder='{"salmon": 180, "asparagus": 90}'
+            )
+            run_btn = gr.Button("Analyze & Create Recipe")
+        with gr.Column(scale=1):
+            labels_out = gr.JSON(label="Top-3 detected foods (label + probability)")
+            nutrition_out = gr.Dataframe(label="Estimated Nutrition (approx)", wrap=True)
+            recipe_out = gr.Markdown(label="Personalized Recipe")
+
+    run_btn.click(
+        run_pipeline,
+        inputs=[image_in, servings, calories_goal, dietary_prefs, grams_overrides],
+        outputs=[labels_out, nutrition_out, recipe_out]
+    )
+
+
+
+# === Cell 7 (Optional): Quick local test without opening the UI ===
+# Uses the image you uploaded in this chat environment. On your machine,
+# replace the path with your local image file to sanity-check the pipeline.
+
+from pathlib import Path
+
+sample_path = Path("/Users/MAC/Desktop/food1.jpg")
+  # change if needed
+if sample_path.exists():
+    img = Image.open(sample_path).convert("RGB")
+    display(img)
+    result = coordinator(img, user_prefs="high protein, no dairy", servings=2, calories_goal=600)
+    print("Detections:", result["detections"])
+    display(nutrition_df(result["nutrition"]))
+    print(result["recipe_text"])
+else:
+    print("Sample image not found at:", sample_path)
+    print("Tip: set 'sample_path' to a local image to test quickly.")
+
+demo.launch(share=False)  # set share=True if you want a public link
