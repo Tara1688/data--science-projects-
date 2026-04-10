@@ -1,0 +1,274 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyM2tL1YL2UNOAn3jn+GfyOr",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Tara1688/data--science-projects-/blob/main/pyhthon%20Assignment%204\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Q1: Echo program\n",
+        "# Reads a file line by line and writes each line to echo.txt\n",
+        "\n",
+        "filename = input(\"Enter the name of the file to read: \")\n",
+        "\n",
+        "try:\n",
+        "    with open(filename, \"r\") as infile, open(\"echo.txt\", \"w\") as outfile:\n",
+        "        for line in infile:\n",
+        "            outfile.write(line)\n",
+        "    print(\"Finished writing to echo.txt\")\n",
+        "\n",
+        "except FileNotFoundError:\n",
+        "    print(\"Error: The file you entered does not exist.\")\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "QZx97xOYaAXX",
+        "outputId": "dee623aa-b4d9-4723-9c21-aabb1f9f49a1"
+      },
+      "execution_count": 1,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter the name of the file to read: sales.txt\n",
+            "Finished writing to echo.txt\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "def process_file(filename):\n",
+        "    highest_average = 0\n",
+        "    best_batch = \"\"\n",
+        "\n",
+        "    with open(filename, \"r\") as file:\n",
+        "        for line in file:\n",
+        "            line = line.strip()\n",
+        "            if not line:\n",
+        "                continue  # skip empty lines\n",
+        "\n",
+        "            # Split batch name from numbers\n",
+        "            batch_name, numbers = line.split(\":\")\n",
+        "            batch_name = batch_name.strip()\n",
+        "            values = numbers.split(\",\")\n",
+        "\n",
+        "            # Convert values to floats with error handling\n",
+        "            valid_numbers = []\n",
+        "\n",
+        "            for v in values:\n",
+        "                v = v.strip()\n",
+        "                try:\n",
+        "                    num = float(v)\n",
+        "                    valid_numbers.append(num)\n",
+        "                except:\n",
+        "                    print(f\"Non-numeric value skipped in {batch_name}: {v}\")\n",
+        "\n",
+        "            # If no valid numeric values, skip the batch\n",
+        "            if len(valid_numbers) == 0:\n",
+        "                print(f\"Batch {batch_name} skipped — no valid numeric data\")\n",
+        "                continue\n",
+        "\n",
+        "            # Compute the average for this batch\n",
+        "            avg = sum(valid_numbers) / len(valid_numbers)\n",
+        "\n",
+        "            # Check if this is the highest average so far\n",
+        "            if avg > highest_average:\n",
+        "                highest_average = avg\n",
+        "                best_batch = batch_name\n",
+        "\n",
+        "    return best_batch, highest_average\n",
+        "\n",
+        "\n",
+        "def main():\n",
+        "    filename = input(\"Enter the filename: \")\n",
+        "    best_batch, highest_average = process_file(filename)\n",
+        "    print(f\"\\nBatch with highest average weight: {best_batch}\")\n",
+        "    print(f\"Highest average weight: {highest_average:.2f}\")\n",
+        "\n",
+        "\n",
+        "main()\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "lnp4WAp8uBf8",
+        "outputId": "2d541546-331f-4f5b-b52c-45905ffaa283"
+      },
+      "execution_count": 5,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter the filename: weights.txt\n",
+            "\n",
+            "Batch with highest average weight: Batch1\n",
+            "Highest average weight: 10.38\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "user_input = input(\"Enter distance in meters or feet: \").strip()\n",
+        "\n",
+        "parts = user_input.split()\n",
+        "\n",
+        "# Expect exactly 2 parts\n",
+        "if len(parts) != 2:\n",
+        "    print(\"Error: You must enter a number followed by a word starting with M or F.\")\n",
+        "    exit()\n",
+        "\n",
+        "number_str, unit_str = parts\n",
+        "\n",
+        "# Validate number\n",
+        "try:\n",
+        "    value = float(number_str)\n",
+        "except:\n",
+        "    print(\"Error: The first part must be a valid number.\")\n",
+        "    exit()\n",
+        "\n",
+        "# Validate unit\n",
+        "unit = unit_str[0].upper()\n",
+        "\n",
+        "if unit not in (\"M\", \"F\"):\n",
+        "    print(\"Error: Unit must start with M (meters) or F (feet).\")\n",
+        "    exit()\n",
+        "\n",
+        "# Conversion\n",
+        "METERS_TO_FEET = 3.28084\n",
+        "\n",
+        "if unit == \"M\":\n",
+        "    result = value * METERS_TO_FEET\n",
+        "    print(f\"{value} meters is {result:.4f} feet\")\n",
+        "else:\n",
+        "    result = value / METERS_TO_FEET\n",
+        "    print(f\"{value} feet is {result:.4f} meters\")\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "eYPAHNM20h0t",
+        "outputId": "b12855d9-ff26-4c3f-f2a6-45f07459aec3"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter distance in meters or feet: 100 M\n",
+            "100.0 meters is 328.0840 feet\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "filename = input(\"Enter transaction filename: \").strip()\n",
+        "\n",
+        "# Try to open the file\n",
+        "try:\n",
+        "    file = open(filename, \"r\")\n",
+        "except:\n",
+        "    print(\"Error: Cannot open file.\")\n",
+        "    exit()\n",
+        "\n",
+        "totals = {}   # dictionary to store total sales per product\n",
+        "\n",
+        "for line in file:\n",
+        "    parts = line.split()\n",
+        "\n",
+        "    # Each valid line must have exactly 6 fields\n",
+        "    if len(parts) != 6:\n",
+        "        print(\"Skipping invalid line:\", line.strip())\n",
+        "        continue\n",
+        "\n",
+        "    trans_id, date, product_id, cust_id, units_str, price_str = parts\n",
+        "\n",
+        "    # Convert units and price\n",
+        "    try:\n",
+        "        units = int(units_str)\n",
+        "        price = float(price_str)\n",
+        "    except:\n",
+        "        print(\"Skipping line with invalid numbers:\", line.strip())\n",
+        "        continue\n",
+        "\n",
+        "    # Compute sale amount\n",
+        "    sale_amount = units * price\n",
+        "\n",
+        "    # Add to product total\n",
+        "    if product_id not in totals:\n",
+        "        totals[product_id] = 0\n",
+        "\n",
+        "    totals[product_id] += sale_amount\n",
+        "\n",
+        "file.close()\n",
+        "\n",
+        "# Display results\n",
+        "print(\"\\nTotal Sales by Product:\")\n",
+        "for pid, total in totals.items():\n",
+        "    print(f\"{pid}: ${total:.2f}\")\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 0
+        },
+        "id": "ZFa2KGChZ_xR",
+        "outputId": "cad3a0b6-bb5d-4b74-87a6-569d1d137c55"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter transaction filename: sales01.txt\n",
+            "\n",
+            "Total Sales by Product:\n",
+            "P123: $259.87\n",
+            "X55: $71.50\n",
+            "Z9: $156.00\n"
+          ]
+        }
+      ]
+    }
+  ]
+}
