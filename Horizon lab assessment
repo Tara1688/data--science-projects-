@@ -1,1 +1,42 @@
+import pandas as pd
 
+# Load the data
+df = pd.read_csv("nj_train_excel_table.csv")
+
+# 1) Highest trip volume by time period
+top_volume = df.loc[df["Trip_Volume"].idxmax(), ["Day_Type", "Time_Period", "Trip_Volume"]]
+
+# 2) Highest average fare by time period
+top_fare = df.loc[df["Avg_Fare_USD"].idxmax(), ["Day_Type", "Time_Period", "Avg_Fare_USD"]]
+
+# 3) Total trips by day type
+day_summary = df.groupby("Day_Type", as_index=False)["Trip_Volume"].sum()
+day_summary["Share_%"] = (day_summary["Trip_Volume"] / day_summary["Trip_Volume"].sum() * 100).round(1)
+
+# 4) Average fare by day type
+fare_summary = df.groupby("Day_Type", as_index=False)["Avg_Fare_USD"].mean().round(2)
+
+# 5) Peak vs off-peak comparison
+peak = df[df["Time_Period"].isin(["Morning Peak", "Evening Peak"])]
+off_peak = df[~df["Time_Period"].isin(["Morning Peak", "Evening Peak"])]
+
+peak_volume = peak["Trip_Volume"].mean()
+off_peak_volume = off_peak["Trip_Volume"].mean()
+peak_fare = peak["Avg_Fare_USD"].mean()
+off_peak_fare = off_peak["Avg_Fare_USD"].mean()
+
+# Findings
+findings = [
+    f"Highest trip volume occurs during {top_volume['Day_Type']} {top_volume['Time_Period']} with {top_volume['Trip_Volume']:,} trips.",
+    f"Highest average fare occurs during {top_fare['Day_Type']} {top_fare['Time_Period']} at ${top_fare['Avg_Fare_USD']:.2f}.",
+    f"Weekday trips account for {day_summary.loc[day_summary['Day_Type']=='Weekday', 'Share_%'].iloc[0]}% of total volume.",
+    f"Weekend trips account for {day_summary.loc[day_summary['Day_Type']=='Weekend', 'Share_%'].iloc[0]}% of total volume.",
+    f"Peak periods average {peak_volume:,.0f} trips versus {off_peak_volume:,.0f} for off-peak periods.",
+    f"Peak periods average ${peak_fare:.2f} fare versus ${off_peak_fare:.2f} off-peak."
+]
+
+for i, f in enumerate(findings, 1):
+    print(f"{i}. {f}")
+
+# Optional: save findings to file
+pd.DataFrame({"Finding": findings}).to_csv("nj_train_findings.csv", index=False)
